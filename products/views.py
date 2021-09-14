@@ -30,22 +30,14 @@ class ProductsView(View):
         category_name = search if search else categories.get(category,'')
         
         q = Q()
-        if option == 'new' or category == 'new':
-            q = Q(is_new=True)
-            category_name = 'NEW'
-
-        if option == 'sale' or category == 'sale':
-            q = Q(~Q(discount_percent=0))
-            category_name = 'SALE'
-
-        if (category != 'new' and category != 'sale') and category:
-            q &= Q(category_id=category)
-            category_name = categories[category]
-
-        if search:
-            q &= Q(name__icontains = search)
-            category_name = search
-
+        if option == 'new' or category == 'new': q = Q(is_new=True)
+            
+        if option == 'sale' or category == 'sale': q = Q(~Q(discount_percent=0))
+                        
+        if (category != 'new' and category != 'sale') and category: q &= Q(category_id=category)
+                        
+        if search: q &= Q(name__icontains = search)
+                        
         products = Product.objects.filter(q).prefetch_related('image_set')\
             .annotate(avg_rate=Avg('comment__rate'),popular=Count("userproductlike", distinct=True),review_count=Count('comment',distinct=True))\
             .order_by(order)[offset:offset+limit]
