@@ -19,7 +19,8 @@ class ProductsView(View):
     @input_validator
     @visitor_validator
     def get(self, request):
-        option   = request.GET.get('option', None)
+        new      = request.GET.get('new', 0)
+        sale     = int(request.GET.get('sale', 0))
         offset   = int(request.GET.get('offset', 0))
         limit    = int(request.GET.get('limit', 10))
         order    = request.GET.get('order', 'id')
@@ -27,26 +28,26 @@ class ProductsView(View):
         category = request.GET.get('category', 0)
 
         categories = {"1":'집콕KIT',"2":'전자제품',"3":'홈트레이닝', "new":"NEW", "sale":"SALE"}
-        category_name = search if search else categories.get(category,'')
-        
-        q = Q()
-        if option == 'new' or category == 'new': q = Q(is_new=True)
-            
-        if option == 'sale' or category == 'sale': q = Q(~Q(discount_percent=0))
-                        
-        if (category != 'new' and category != 'sale') and category: q &= Q(category_id=category)
-                        
-        if search: q &= Q(name__icontains = search)
-                        
-        products = Product.objects.filter(q).prefetch_related('image_set')\
+        category_name = search if search else categories.get(category,'') 
+    
+        filter_set = {
+            "search"   : "name__icontains",
+            "new"      : "is_new",
+            "sale"     : "discount_percent__gte",
+            "category" : "category_id"
+        }               
+
+        q = {filter_set.get(i):v for (i,v) in request.GET.items() if filter_set.get(i)}
+                          
+        products = Product.objects.filter(**q).prefetch_related('image_set')\
             .annotate(avg_rate=Avg('comment__rate'),popular=Count("userproductlike", distinct=True),review_count=Count('comment',distinct=True))\
             .order_by(order)[offset:offset+limit]
 
-        total_count = Product.objects.filter(q).count()
+        total_count = Product.objects.filter(**q).count()
 
         likes = None
         if request.user:
-            likes = [i.id for i in Product.objects.filter(q).filter(userproductlike__user_id=request.user)[offset:offset+limit]]
+            likes = [i.id for i in Product.objects.filter(**q).filter(userproductlike__user_id=request.user)[offset:offset+limit]]
 
         results = [{
             'id'               : product.id,

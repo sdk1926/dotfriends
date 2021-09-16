@@ -13,8 +13,16 @@ def input_validator(func):
             limit    = int(request.GET.get('limit', 12))
             order    = request.GET.get('order', 'id')
             category = request.GET.get('category', 0)
+            sale     = int(request.GET.get('sale', 0))
+            new      = int(request.GET.get('new', 0))
 
-            if (category != 'new' and category != 'sale') and category and not (Category.objects.filter(id=int(category)).exists()):
+            if new != 1 and new != 0: 
+                return HttpResponse(status=400)
+            
+            if sale != 1 and sale != 0: 
+                return HttpResponse(status=400)
+    
+            if category == '' or category and not (Category.objects.filter(id=int(category)).exists()):
                 return HttpResponse(status=404)
 
             if not (order == 'id' or order == '-id' or order == '?'\
@@ -41,4 +49,3 @@ def visitor_validator(func):
             return JsonResponse({'MESSAGE':'INVALID_TOKEN'},status=401)
         return func(self, request, *args, **kwargs)
     return wraper
-
