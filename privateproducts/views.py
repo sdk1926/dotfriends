@@ -1,19 +1,14 @@
-import json
-import jwt
+from django.http        import JsonResponse
+from django.db.models   import Q, Count, Avg, Case, When
+from django.http        import JsonResponse
+from django.views       import View
 
-from django.http  import JsonResponse
-from django.db.models import Q, Count, Avg
-from django.http      import JsonResponse
-from django.views     import View
-from django.conf      import settings
+from products.models    import Product
+from comments.models    import Comment
+from products.decorator import input_validator, visitor_validator
 
-from .models          import Product, UserProductLike
-from comments.models  import Comment
-from .decorator       import input_validator, query_debugger
-from users.decorators import login_decorator
-
-class PublicProductsView(View):
-    @query_debugger
+class PrivateProductsView(View):
+    @visitor_validator
     @input_validator
     def get(self, request):
         new      = request.GET.get('new', 0)
@@ -42,6 +37,10 @@ class PublicProductsView(View):
 
         total_count = Product.objects.filter(**q).count()
 
+        likes = None
+        if request.user:
+            likes = [i.id for i in Product.objects.filter(**q).filter(userproductlike__user_id=request.user)[offset:offset+limit]]
+
         results = [{
             'id'               : product.id,
             'name'             : product.name,
@@ -51,6 +50,7 @@ class PublicProductsView(View):
             'avg_rate'         : round(product.avg_rate, 2) if product.avg_rate else product.avg_rate,
             'review_count'     : product.review_count,
             'is_new'           : product.is_new,
+            'isLiked'          : True if likes and product.id in likes else False,
             'discount_percent' : int(product.discount_percent),
             'discounted_price' : int(product.price*(100-product.discount_percent)/100),
             'image'            : [image.url for image in product.image_set.all()],
@@ -58,14 +58,16 @@ class PublicProductsView(View):
 
         return JsonResponse({'results': results, 'count': total_count, 'category': category_name}, status=200)
 
-class PublicProductDetailView(View):
+class PrivateProductDetailView(View):
+    @visitor_validator
     def get(self, request, product_id):
         
         if not (Product.objects.filter(id=product_id).exists()):
             return JsonResponse({'MESSAGE': 'NOT_FOUND'}, status=404)
         
         product  = Product.objects.annotate(avg_rate=Avg('comment__rate'),likes=Count("userproductlike", distinct=True)\
-                   ,comment_count=Count('comment',distinct=True)).get(id=product_id)
+            ,comment_count=Count('comment',distinct=True)\
+                ,is_liked=Count(Case(When(Q(userproductlike__user__id=request.user)&Q(userproductlike__product__id=product_id),then=0)),distinct=True)).get(id=product_id)
         comments = Comment.objects.filter(product_id=product_id).select_related('user').prefetch_related('commentimage_set')
                 
         results = {
@@ -76,6 +78,7 @@ class PublicProductDetailView(View):
             'discounted_price' : int(product.price*(100-product.discount_percent)/100),
             'likes'            : product.likes,
             'is_new'           : product.is_new,
+            'isLiked'          : product.is_liked,
             'comment_avg_rate' : round(product.avg_rate,1),
             'comment_count'    : product.comment_count,
             'images'           : [image.url for image in product.image_set.all()],
@@ -88,23 +91,3 @@ class PublicProductDetailView(View):
             }for comment in comments]}
                 
         return JsonResponse({'results': results}, status=200)
-
-class UserProductLikesView(View):
-    @login_decorator
-    def post(self, request):
-        try:
-
-            data = json.loads(request.body)
-
-            if not data['isLiked'] :
-                UserProductLike.objects.create(user_id = request.user.id, product_id = data['productId'])
-                return JsonResponse({'MESSAGE':'CREATED'}, status=201)
-
-            UserProductLike.objects.get(user_id = request.user.id, product_id = data['productId']).delete()
-            return JsonResponse({'MESSAGE':'CREATED'}, status=201)
-        
-        except KeyError:
-            return JsonResponse({'MESSAGE':'KEY_ERROR'}, status=400)
-        
-        except jwt.DecodeError:
-            return JsonResponse({'MESSAGE':'INVALID_AUTHORIZATION'}, status=403)
