@@ -7,6 +7,7 @@ from django.http      import JsonResponse
 from django.views     import View
 from django.conf      import settings
 from django.core.exceptions import FieldError, ValidationError
+from django.db.models.query import prefetch_related_objects
 
 from .models          import Product, UserProductLike
 from comments.models  import Comment
@@ -23,20 +24,26 @@ class PublicProductsView(View):
             category = request.GET.get('category', 0)
             offset   = int(request.GET.get('offset', 0))
             limit    = int(request.GET.get('limit', 10))
-
+            print(order)
+            order=order.replace("'",'')
             filter_set = {
                 "search"   : "name__icontains",
                 "new"      : "is_new",
                 "sale"     : "discount_percent__gte",
                 "category" : "category_id"
             }               
-
             q = {filter_set.get(i):v for (i,v) in request.GET.items() if filter_set.get(i)}
                             
-            products = Product.objects.filter(**q).prefetch_related('image_set')\
-                .annotate(avg_rate=Avg('comment__rate'),popular=Count("userproductlike", distinct=True),review_count=Count('comment',distinct=True))\
-                .order_by(order)[offset:offset+limit]
-
+            products = Product.objects.raw('SELECT p.id, p.name, p.price, p.discount_percent, p.is_new, p.category_id, \
+                                            p.created_at, p.updated_at,AVG(comments.rate) AS avg_rate, \
+                                            COUNT(DISTINCT userproductlikes.id) AS popular, COUNT(DISTINCT comments.id) AS review_count \
+                                            FROM products as p LEFT OUTER JOIN comments ON (p.id = comments.product_id)\
+                                            LEFT OUTER JOIN userproductlikes \
+                                            ON(p.id=userproductlikes.product_id) \
+                                            JOIN(SELECT id from products \
+                                            ORDER BY {order} limit {offset}, {limit}) as temp on temp.id = p.id \
+                                            GROUP BY p.id;'.format(offset= offset, limit= limit, order=order))
+            prefetch_related_objects(products, 'image_set')
             total_count = Product.objects.filter(**q).count()
 
             results = [{
